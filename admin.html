@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>抢答器 · 主持人端</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }
+  .container { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  .card { background: #1e293b; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+  h1 { font-size: 22px; margin: 0 0 16px; }
+  h2 { font-size: 16px; margin: 0 0 12px; color: #94a3b8; }
+  label { display: block; margin: 8px 0 4px; font-size: 14px; color: #94a3b8; }
+  input, textarea { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 15px; font-family: inherit; }
+  textarea { min-height: 80px; resize: vertical; }
+  button { padding: 10px 16px; border-radius: 8px; border: none; font-size: 15px; cursor: pointer; font-weight: 600; }
+  .btn { background: #334155; color: #e2e8f0; }
+  .btn-primary { background: #3b82f6; color: white; }
+  .btn-green { background: #22c55e; color: white; }
+  .btn-red { background: #ef4444; color: white; }
+  .btn-sm { padding: 6px 10px; font-size: 13px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; }
+  .row > * { flex: 1; min-width: 120px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+  .winner-box { text-align: center; padding: 40px 20px; border-radius: 16px; background: #1e293b; border: 3px solid #334155; }
+  .winner-box.active { background: #065f46; border-color: #22c55e; }
+  .winner-box .label { font-size: 16px; color: #94a3b8; }
+  .winner-box .value { font-size: 72px; font-weight: 900; line-height: 1.1; margin: 8px 0; }
+  .winner-box .sub { font-size: 18px; color: #cbd5e1; }
+  .player-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .player-table th, .player-table td { padding: 8px; text-align: left; border-bottom: 1px solid #334155; }
+  .muted { color: #94a3b8; font-size: 14px; }
+  .hidden { display: none; }
+  .status-bar { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; color: #94a3b8; }
+  .status-bar b { color: #e2e8f0; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🎯 抢答器 · 主持人控制台</h1>
+
+  <div id="loginView" class="card">
+    <label>主持人密码</label>
+    <div class="row">
+      <input id="password" type="password" placeholder="请输入密码">
+      <button class="btn-primary" onclick="login()">进入</button>
+    </div>
+    <p id="loginError" class="muted" style="color:#f87171"></p>
+  </div>
+
+  <div id="mainView" class="hidden">
+    <div class="status-bar card" style="padding:12px 20px">
+      <span>状态：<b id="phaseText">-</b></span>
+      <span>题目：<b id="qNumText">-</b></span>
+      <span>已加入选手：<b id="onlineCount">-</b></span>
+    </div>
+
+    <div class="winner-box" id="winnerBox">
+      <div class="label">抢答结果</div>
+      <div class="value" id="winnerValue">—</div>
+      <div class="sub" id="winnerSub">等待抢答</div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>题目管理</h2>
+        <label>题目内容</label>
+        <textarea id="questionInput" placeholder="输入题目…"></textarea>
+        <div class="row" style="margin-top:12px">
+          <button class="btn-green" onclick="nextQuestion()">下一题并显示</button>
+          <button class="btn" onclick="updateQuestion()">仅更新题目</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>抢答控制</h2>
+        <label>倒计时秒数</label>
+        <input id="seconds" type="number" value="10" min="1" max="120">
+        <div class="row" style="margin-top:12px">
+          <button class="btn-primary" onclick="openBuzz()">开始抢答</button>
+          <button class="btn-red" onclick="lockBuzz()">锁定</button>
+          <button class="btn" onclick="resetBuzz()">重置本题</button>
+        </div>
+        <p class="muted" style="margin-top:12px">"开始抢答"会同时启动倒计时，到 0 自动锁定。</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>赛前检查 · 已加入选手</h2>
+      <table class="player-table">
+        <thead><tr><th>组号</th><th>昵称</th><th>操作</th></tr></thead>
+        <tbody id="playerTbody"></tbody>
+      </table>
+      <div class="row" style="margin-top:12px">
+        <button class="btn-red btn-sm" onclick="clearPlayers()">清空所有选手</button>
+        <button class="btn btn-sm" onclick="resetAll()">重置整场比赛</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+let password = sessionStorage.getItem('adminPassword') || '';
+let pollTimer = null;
+
+async function login() {
+  password = document.getElementById('password').value;
+  try {
+    const res = await fetch(`/api/admin/state?password=${encodeURIComponent(password)}`);
+    const data = await res.json();
+    if (!data.ok) { document.getElementById('loginError').textContent = data.error; return; }
+    sessionStorage.setItem('adminPassword', password);
+    document.getElementById('loginView').classList.add('hidden');
+    document.getElementById('mainView').classList.remove('hidden');
+    poll();
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(poll, 1000);
+  } catch (e) {
+    document.getElementById('loginError').textContent = '网络错误';
+  }
+}
+
+async function poll() {
+  if (!password) return;
+  try {
+    const res = await fetch(`/api/admin/state?password=${encodeURIComponent(password)}`);
+    const s = await res.json();
+    if (!s.ok) return;
+    render(s);
+  } catch (e) {}
+}
+
+function render(s) {
+  const phaseMap = { idle: '待机', open: '抢答中', locked: '已锁定', timeout: '超时' };
+  document.getElementById('phaseText').textContent = phaseMap[s.phase] || s.phase;
+  document.getElementById('qNumText').textContent = s.questionNumber > 0 ? `第 ${s.questionNumber} 题` : '未出题';
+  document.getElementById('onlineCount').textContent = s.players.length + ' / 10';
+
+  if (!document.getElementById('questionInput').matches(':focus')) {
+    document.getElementById('questionInput').value = s.questionText || '';
+  }
+
+  const winnerBox = document.getElementById('winnerBox');
+  const winnerValue = document.getElementById('winnerValue');
+  const winnerSub = document.getElementById('winnerSub');
+
+  if (s.phase === 'locked' && s.winner) {
+    winnerBox.classList.add('active');
+    winnerValue.textContent = `第 ${s.winner.group} 组`;
+    winnerSub.textContent = `${s.winner.name} · ${new Date(s.winner.time).toLocaleTimeString()}`;
+  } else if (s.phase === 'timeout') {
+    winnerBox.classList.add('active');
+    winnerValue.textContent = '超时';
+    winnerSub.textContent = '无人抢答';
+  } else if (s.phase === 'open') {
+    winnerBox.classList.remove('active');
+    winnerValue.textContent = '抢答中…';
+    winnerSub.textContent = '等待选手按下按钮';
+  } else {
+    winnerBox.classList.remove('active');
+    winnerValue.textContent = '—';
+    winnerSub.textContent = '等待开始';
+  }
+
+  const tbody = document.getElementById('playerTbody');
+  tbody.innerHTML = '';
+  const sorted = [...s.players].sort((a, b) => a.group - b.group);
+  for (const p of sorted) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><b>第 ${p.group} 组</b></td>
+      <td>${escapeHtml(p.name)}</td>
+      <td><button class="btn-red btn-sm" onclick="kick('${p.id}')">踢出</button></td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+async function action(action, payload = {}) {
+  const res = await fetch('/api/admin/action', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ password, action, payload })
+  });
+  const data = await res.json();
+  if (!data.ok) alert(data.error || '操作失败');
+  poll();
+}
+
+function nextQuestion() {
+  const text = document.getElementById('questionInput').value.trim();
+  if (!text) { alert('请先输入题目'); return; }
+  action('setQuestion', { text, next: true });
+}
+function updateQuestion() {
+  const text = document.getElementById('questionInput').value.trim();
+  action('setQuestion', { text, next: false });
+}
+function openBuzz() {
+  const seconds = Number(document.getElementById('seconds').value) || 10;
+  action('open', { seconds });
+}
+function lockBuzz() { action('lock'); }
+function resetBuzz() { action('reset'); }
+function kick(id) { if (confirm('确定踢出该选手？')) action('kick', { playerId: id }); }
+function clearPlayers() { if (confirm('确定清空所有选手？')) action('clearPlayers'); }
+function resetAll() { if (confirm('确定重置整场比赛？')) action('resetAll'); }
+
+if (password) login();
+</script>
+</body>
+</html>
