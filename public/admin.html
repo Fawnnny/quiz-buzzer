@@ -31,8 +31,6 @@
   .winner-box .sub { font-size: 18px; color: #cbd5e1; }
   .player-table { width: 100%; border-collapse: collapse; font-size: 14px; }
   .player-table th, .player-table td { padding: 8px; text-align: left; border-bottom: 1px solid #334155; }
-  .online { color: #22c55e; }
-  .offline { color: #f87171; }
   .muted { color: #94a3b8; font-size: 14px; }
   .hidden { display: none; }
   .status-bar { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; color: #94a3b8; }
@@ -56,7 +54,7 @@
     <div class="status-bar card" style="padding:12px 20px">
       <span>状态：<b id="phaseText">-</b></span>
       <span>题目：<b id="qNumText">-</b></span>
-      <span>在线选手：<b id="onlineCount">-</b></span>
+      <span>已加入选手：<b id="onlineCount">-</b></span>
     </div>
 
     <div class="winner-box" id="winnerBox">
@@ -85,14 +83,14 @@
           <button class="btn-red" onclick="lockBuzz()">锁定</button>
           <button class="btn" onclick="resetBuzz()">重置本题</button>
         </div>
-        <p class="muted" style="margin-top:12px">“开始抢答”会同时启动倒计时。倒计时结束自动锁定。</p>
+        <p class="muted" style="margin-top:12px">"开始抢答"会同时启动倒计时，到 0 自动锁定。</p>
       </div>
     </div>
 
     <div class="card">
       <h2>赛前检查 · 已加入选手</h2>
       <table class="player-table">
-        <thead><tr><th>组号</th><th>昵称</th><th>状态</th><th>操作</th></tr></thead>
+        <thead><tr><th>组号</th><th>昵称</th><th>操作</th></tr></thead>
         <tbody id="playerTbody"></tbody>
       </table>
       <div class="row" style="margin-top:12px">
@@ -116,6 +114,7 @@ async function login() {
     document.getElementById('loginView').classList.add('hidden');
     document.getElementById('mainView').classList.remove('hidden');
     poll();
+    if (pollTimer) clearInterval(pollTimer);
     pollTimer = setInterval(poll, 1000);
   } catch (e) {
     document.getElementById('loginError').textContent = '网络错误';
@@ -136,7 +135,7 @@ function render(s) {
   const phaseMap = { idle: '待机', open: '抢答中', locked: '已锁定', timeout: '超时' };
   document.getElementById('phaseText').textContent = phaseMap[s.phase] || s.phase;
   document.getElementById('qNumText').textContent = s.questionNumber > 0 ? `第 ${s.questionNumber} 题` : '未出题';
-  document.getElementById('onlineCount').textContent = s.players.filter(p => p.online).length + ' / ' + s.players.length;
+  document.getElementById('onlineCount').textContent = s.players.length + ' / 10';
 
   if (!document.getElementById('questionInput').matches(':focus')) {
     document.getElementById('questionInput').value = s.questionText || '';
@@ -172,7 +171,6 @@ function render(s) {
     tr.innerHTML = `
       <td><b>第 ${p.group} 组</b></td>
       <td>${escapeHtml(p.name)}</td>
-      <td class="${p.online ? 'online' : 'offline'}">${p.online ? '在线' : '离线'}</td>
       <td><button class="btn-red btn-sm" onclick="kick('${p.id}')">踢出</button></td>
     `;
     tbody.appendChild(tr);

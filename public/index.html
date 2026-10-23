@@ -15,12 +15,12 @@
   button { padding: 12px 20px; border-radius: 8px; border: none; font-size: 16px; cursor: pointer; font-weight: 600; }
   .btn-primary { background: #3b82f6; color: white; width: 100%; margin-top: 16px; }
   .btn-primary:disabled { background: #475569; cursor: not-allowed; }
-  .buzz-btn { width: 100%; padding: 40px; font-size: 32px; font-weight: 800; border-radius: 16px; background: #ef4444; color: white; margin-top: 16px; }
+  .buzz-btn { width: 100%; padding: 40px; font-size: 32px; font-weight: 800; border-radius: 16px; background: #ef4444; color: white; margin-top: 16px; border: none; }
   .buzz-btn:disabled { background: #475569; }
   .buzz-btn.ready { animation: pulse 1s infinite; }
   @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.02); } }
   .question { font-size: 22px; line-height: 1.5; min-height: 60px; }
-  .countdown { font-size: 48px; font-weight: 800; text-align: center; color: #fbbf24; }
+  .countdown { font-size: 48px; font-weight: 800; text-align: center; color: #fbbf24; min-height: 56px; }
   .winner { font-size: 24px; font-weight: 800; text-align: center; padding: 20px; border-radius: 12px; background: #065f46; color: #d1fae5; margin-top: 16px; }
   .winner.me { background: #166534; }
   .muted { color: #94a3b8; font-size: 14px; }
@@ -63,7 +63,6 @@ for (let i = 1; i <= 10; i++) {
 
 let playerId = localStorage.getItem('playerId');
 let token = localStorage.getItem('token');
-let me = null;
 let pollTimer = null;
 let countdownTimer = null;
 
@@ -93,7 +92,8 @@ function showPlay() {
   document.getElementById('joinView').classList.add('hidden');
   document.getElementById('playView').classList.remove('hidden');
   poll();
-  pollTimer = setInterval(poll, 1000);
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(poll, 1500);
 }
 
 async function poll() {
@@ -102,8 +102,20 @@ async function poll() {
     const res = await fetch(`/api/state?playerId=${playerId}&token=${token}`);
     const s = await res.json();
     if (!s.ok) return;
-    me = s.me;
-    document.getElementById('meInfo').textContent = me ? `${me.group} 组 · ${me.name}` : '身份失效';
+
+    // token 失效（被踢出或清空了选手），回到加入页
+    if (!s.me) {
+      localStorage.removeItem('playerId');
+      localStorage.removeItem('token');
+      playerId = null; token = null;
+      if (pollTimer) clearInterval(pollTimer);
+      document.getElementById('playView').classList.add('hidden');
+      document.getElementById('joinView').classList.remove('hidden');
+      document.getElementById('joinError').textContent = '你已被移出，请重新加入';
+      return;
+    }
+
+    document.getElementById('meInfo').textContent = `${s.me.group} 组 · ${s.me.name}`;
     document.getElementById('question').textContent = s.questionText || '等待主持人出题…';
 
     const buzzBtn = document.getElementById('buzzBtn');
@@ -121,7 +133,7 @@ async function poll() {
     }
 
     if (s.phase === 'locked' && s.winner) {
-      const isMe = me && s.winner.group === me.group;
+      const isMe = s.winner.group === s.me.group;
       winnerEl.classList.remove('hidden');
       winnerEl.classList.toggle('me', isMe);
       winnerEl.textContent = isMe ? '🎉 你抢到了！' : `第 ${s.winner.group} 组抢到（${s.winner.name}）`;
