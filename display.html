@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>抢答大屏</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0; }
+  #app { display: grid; grid-template-rows: 1fr auto auto; height: 100vh; gap: 12px; padding: 12px; }
+
+  .question-area {
+    background: #1e293b; border-radius: 16px; padding: 32px;
+    display: flex; flex-direction: column; justify-content: center;
+    overflow: hidden; transition: opacity 0.3s;
+  }
+  .question-area.buzzing { border: 4px solid #22c55e; animation: glow 1s infinite alternate; }
+  @keyframes glow { from { box-shadow: 0 0 20px rgba(34,197,94,0.3); } to { box-shadow: 0 0 60px rgba(34,197,94,0.9); } }
+  .question-meta { font-size: 24px; color: #94a3b8; margin-bottom: 24px; }
+  .question-text { font-size: clamp(36px, 6vw, 96px); font-weight: 800; line-height: 1.3; word-break: break-word; }
+  .answer-banner {
+    margin-top: 24px; padding: 24px; border-radius: 12px;
+    background: #065f46; border: 2px solid #22c55e; display: none;
+  }
+  .answer-banner.show { display: block; animation: slideIn 0.5s; }
+  @keyframes slideIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .answer-banner .label { font-size: 20px; color: #a7f3d0; margin-bottom: 8px; }
+  .answer-banner .answer { font-size: clamp(32px, 5vw, 72px); font-weight: 900; color: #fde68a; word-break: break-word; }
+  .answer-banner .explain { font-size: 20px; color: #cbd5e1; margin-top: 12px; }
+
+  .middle-bar {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+    background: #1e293b; border-radius: 16px; padding: 20px;
+    align-items: center; min-height: 130px;
+  }
+  .countdown-display { text-align: center; }
+  .countdown-display .num { font-size: clamp(48px, 8vw, 120px); font-weight: 900; color: #fbbf24; line-height: 1; }
+  .countdown-display .label { font-size: 18px; color: #94a3b8; margin-top: 4px; }
+  .buzz-status { text-align: center; }
+  .buzz-status .status { font-size: 22px; color: #94a3b8; }
+  .buzz-status .winner { font-size: clamp(40px, 6vw, 88px); font-weight: 900; color: #22c55e; line-height: 1.1; }
+  .buzz-status .winner.hidden { display: none; }
+  .buzz-status .winner-sub { font-size: 20px; color: #cbd5e1; }
+
+  .score-board { background: #1e293b; border-radius: 16px; padding: 16px 20px; }
+  .score-board h3 { margin: 0 0 12px; font-size: 18px; color: #94a3b8; }
+  .score-list { display: flex; gap: 12px; flex-wrap: wrap; }
+  .score-item {
+    flex: 1; min-width: 100px; background: #0f172a; border-radius: 12px;
+    padding: 12px; text-align: center; border: 2px solid transparent; transition: all 0.3s;
+  }
+  .score-item.leading { border-color: #fbbf24; background: #422006; }
+  .score-item .group { font-size: 16px; color: #94a3b8; }
+  .score-item .name { font-size: 16px; color: #e2e8f0; margin: 2px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .score-item .score { font-size: 32px; font-weight: 900; color: #22c55e; }
+  .score-item.flash { animation: flash 0.6s; }
+  @keyframes flash { 0%,100% { background: #0f172a; } 50% { background: #22c55e; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="question-area" id="questionArea">
+    <div class="question-meta">
+      <span id="qNum">等待出题</span>
+      <span id="phaseBadge"></span>
+    </div>
+    <div class="question-text" id="questionText">请主持人出题…</div>
+    <div class="answer-banner" id="answerBanner">
+      <div class="label">📢 答案</div>
+      <div class="answer" id="answerText"></div>
+      <div class="explain" id="answerExplain"></div>
+    </div>
+  </div>
+
+  <div class="middle-bar">
+    <div class="countdown-display">
+      <div class="num" id="countdownNum">—</div>
+      <div class="label" id="countdownLabel"></div>
+    </div>
+    <div class="buzz-status">
+      <div class="status" id="buzzStatus">等待</div>
+      <div class="winner hidden" id="buzzWinner"></div>
+      <div class="winner-sub" id="buzzWinnerSub"></div>
+    </div>
+  </div>
+
+  <div class="score-board">
+    <h3>🏆 分数榜</h3>
+    <div class="score-list" id="scoreList"></div>
+  </div>
+</div>
+<script>
+let countdownTimer = null;
+let lastScoresJSON = '';
+
+async function poll() {
+  try {
+    const res = await fetch('/api/display/state');
+    const s = await res.json();
+    if (s.ok) render(s);
+  } catch (e) {}
+}
+
+function render(s) {
+  document.getElementById('qNum').textContent = s.questionNumber > 0
+    ? `第 ${s.questionNumber} / ${s.totalQuestions} 题`
+    : '等待出题';
+
+  const badgeMap = { idle: '待机', countdown: '准备中', open: '抢答中', locked: '已锁定', timeout: '超时', revealed: '已揭晓' };
+  document.getElementById('phaseBadge').textContent = badgeMap[s.phase] ? ` · ${badgeMap[s.phase]}` : '';
+  document.getElementById('questionText').textContent = s.questionText || '请主持人出题…';
+
+  const area = document.getElementById('questionArea');
+  const buzzStatus = document.getElementById('buzzStatus');
+  const buzzWinner = document.getElementById('buzzWinner');
+  const buzzWinnerSub = document.getElementById('buzzWinnerSub');
+  const cdNum = document.getElementById('countdownNum');
+  const cdLabel = document.getElementById('countdownLabel');
+
+  clearTimeout(countdownTimer);
+
+  if (s.phase === 'countdown' && s.prepareEnd) {
+    area.classList.remove('buzzing');
+    buzzStatus.textContent = '准备抢答';
+    buzzWinner.classList.add('hidden');
+    buzzWinnerSub.textContent = '';
+    runCountdown(s.prepareEnd, (sec) => { cdNum.textContent = sec; cdLabel.textContent = '准备倒计时'; });
+  } else if (s.phase === 'open' && s.countdownEnd) {
+    area.classList.add('buzzing');
+    buzzStatus.textContent = '抢答开放！';
+    buzzWinner.classList.add('hidden');
+    buzzWinnerSub.textContent = '';
+    runCountdown(s.countdownEnd, (sec) => { cdNum.textContent = sec; cdLabel.textContent = '抢答剩余'; });
+  } else if ((s.phase === 'locked' || s.phase === 'revealed') && s.winner) {
+    area.classList.remove('buzzing');
+    cdNum.textContent = '🎯';
+    cdLabel.textContent = '';
+    buzzStatus.textContent = '抢答成功';
+    buzzWinner.classList.remove('hidden');
+    buzzWinner.textContent = `第 ${s.winner.group} 组`;
+    buzzWinnerSub.textContent = s.winner.name;
+  } else if (s.phase === 'timeout') {
+    area.classList.remove('buzzing');
+    cdNum.textContent = '⏰';
+    cdLabel.textContent = '';
+    buzzStatus.textContent = '无人抢答';
+    buzzWinner.classList.add('hidden');
+    buzzWinnerSub.textContent = '';
+  } else {
+    area.classList.remove('buzzing');
+    cdNum.textContent = '—';
+    cdLabel.textContent = '';
+    buzzStatus.textContent = '等待主持人开始';
+    buzzWinner.classList.add('hidden');
+    buzzWinnerSub.textContent = '';
+  }
+
+  const banner = document.getElementById('answerBanner');
+  if (s.answerRevealed && s.revealedAnswer) {
+    banner.classList.add('show');
+    document.getElementById('answerText').textContent = s.revealedAnswer;
+    document.getElementById('answerExplain').textContent = s.revealedExplanation || '';
+  } else {
+    banner.classList.remove('show');
+  }
+
+  renderScores(s);
+}
+
+function runCountdown(endsAt, onTick) {
+  const tick = () => {
+    const left = Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
+    onTick(left);
+    if (left > 0) countdownTimer = setTimeout(tick, 150);
+  };
+  tick();
+}
+
+function renderScores(s) {
+  const list = document.getElementById('scoreList');
+  const players = s.players || [];
+  if (players.length === 0) {
+    list.innerHTML = '<div style="color:#94a3b8">暂无选手</div>';
+    return;
+  }
+  const maxScore = Math.max(0, ...players.map(p => s.scores[String(p.group)] || 0));
+  const sorted = [...players].sort((a, b) => a.group - b.group);
+
+  list.innerHTML = sorted.map(p => {
+    const score = s.scores[String(p.group)] || 0;
+    const leading = score > 0 && score === maxScore;
+    return `
+      <div class="score-item ${leading ? 'leading' : ''}" data-group="${p.group}">
+        <div class="group">第 ${p.group} 组</div>
+        <div class="name">${escapeHtml(p.name)}</div>
+        <div class="score">${score}</div>
+      </div>
+    `;
+  }).join('');
+
+  const newJSON = JSON.stringify(s.scores);
+  if (lastScoresJSON && newJSON !== lastScoresJSON) {
+    const oldScores = JSON.parse(lastScoresJSON);
+    for (const p of sorted) {
+      const key = String(p.group);
+      if ((oldScores[key] || 0) !== (s.scores[key] || 0)) {
+        const el = list.querySelector(`[data-group="${p.group}"]`);
+        if (el) { el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 600); }
+      }
+    }
+  }
+  lastScoresJSON = newJSON;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+setInterval(poll, 1200);
+poll();
+</script>
+</body>
+</html>
