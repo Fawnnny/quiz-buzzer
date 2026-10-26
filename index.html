@@ -23,6 +23,9 @@
   .countdown { font-size: 48px; font-weight: 800; text-align: center; color: #fbbf24; min-height: 56px; }
   .winner { font-size: 24px; font-weight: 800; text-align: center; padding: 20px; border-radius: 12px; background: #065f46; color: #d1fae5; margin-top: 16px; }
   .winner.me { background: #166534; }
+  .answer-box { margin-top: 16px; padding: 16px; border-radius: 12px; background: #422006; border: 2px solid #f59e0b; }
+  .answer-box .label { font-size: 14px; color: #fbbf24; margin-bottom: 6px; }
+  .answer-box .answer { font-size: 20px; font-weight: 800; color: #fde68a; }
   .muted { color: #94a3b8; font-size: 14px; }
   .hidden { display: none; }
 </style>
@@ -49,6 +52,11 @@
       <div class="countdown" id="countdown"></div>
       <button class="buzz-btn" id="buzzBtn" onclick="buzz()" disabled>抢答</button>
       <div id="winner" class="winner hidden"></div>
+      <div id="answerBox" class="answer-box hidden">
+        <div class="label">📢 正确答案</div>
+        <div class="answer" id="answerText"></div>
+        <div class="muted" id="answerExplain" style="margin-top:6px"></div>
+      </div>
       <p class="muted" id="status"></p>
     </div>
   </div>
@@ -93,7 +101,7 @@ function showPlay() {
   document.getElementById('playView').classList.remove('hidden');
   poll();
   if (pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(poll, 1500);
+  pollTimer = setInterval(poll, 1200);
 }
 
 async function poll() {
@@ -103,7 +111,6 @@ async function poll() {
     const s = await res.json();
     if (!s.ok) return;
 
-    // token 失效（被踢出或清空了选手），回到加入页
     if (!s.me) {
       localStorage.removeItem('playerId');
       localStorage.removeItem('token');
@@ -121,44 +128,64 @@ async function poll() {
     const buzzBtn = document.getElementById('buzzBtn');
     const winnerEl = document.getElementById('winner');
     const statusEl = document.getElementById('status');
+    const answerBox = document.getElementById('answerBox');
 
+    // 按钮状态
     if (s.phase === 'open') {
       buzzBtn.disabled = false;
       buzzBtn.classList.add('ready');
       statusEl.textContent = '可以抢答！';
-      winnerEl.classList.add('hidden');
     } else {
       buzzBtn.disabled = true;
       buzzBtn.classList.remove('ready');
     }
 
-    if (s.phase === 'locked' && s.winner) {
-      const isMe = s.winner.group === s.me.group;
-      winnerEl.classList.remove('hidden');
-      winnerEl.classList.toggle('me', isMe);
-      winnerEl.textContent = isMe ? '🎉 你抢到了！' : `第 ${s.winner.group} 组抢到（${s.winner.name}）`;
+    if (s.phase === 'countdown') {
+      winnerEl.classList.add('hidden');
+      statusEl.textContent = '准备中，倒计时结束后开放抢答…';
+    } else if (s.phase === 'locked' || s.phase === 'revealed') {
+      if (s.winner) {
+        const isMe = s.winner.group === s.me.group;
+        winnerEl.classList.remove('hidden');
+        winnerEl.classList.toggle('me', isMe);
+        winnerEl.textContent = isMe ? '🎉 你抢到了！' : `第 ${s.winner.group} 组抢到（${s.winner.name}）`;
+      }
       statusEl.textContent = '';
     } else if (s.phase === 'timeout') {
       winnerEl.classList.remove('hidden');
       winnerEl.classList.remove('me');
       winnerEl.textContent = '⏰ 时间到，无人抢答';
+      statusEl.textContent = '';
     } else if (s.phase === 'idle') {
       winnerEl.classList.add('hidden');
       statusEl.textContent = '等待主持人开始…';
     }
 
-    updateCountdown(s.countdownEnd, s.phase);
+    // 揭晓答案
+    if (s.answerRevealed && s.revealedAnswer) {
+      answerBox.classList.remove('hidden');
+      document.getElementById('answerText').textContent = s.revealedAnswer;
+      document.getElementById('answerExplain').textContent = s.revealedExplanation || '';
+    } else {
+      answerBox.classList.add('hidden');
+    }
+
+    updateCountdown(s);
   } catch (e) {}
 }
 
-function updateCountdown(end, phase) {
+function updateCountdown(s) {
   clearInterval(countdownTimer);
   const el = document.getElementById('countdown');
-  if (!end || phase !== 'open') { el.textContent = ''; return; }
+  let end = null;
+  let prefix = '';
+  if (s.phase === 'countdown' && s.prepareEnd) { end = s.prepareEnd; prefix = '准备 '; }
+  else if (s.phase === 'open' && s.countdownEnd) { end = s.countdownEnd; prefix = ''; }
+  if (!end) { el.textContent = ''; return; }
   const tick = () => {
     const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
-    el.textContent = left + 's';
-    if (left <= 0) { el.textContent = '时间到'; clearInterval(countdownTimer); }
+    el.textContent = prefix + left + 's';
+    if (left <= 0) clearInterval(countdownTimer);
   };
   tick();
   countdownTimer = setInterval(tick, 200);
