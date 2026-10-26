@@ -7,34 +7,43 @@
 <style>
   * { box-sizing: border-box; }
   body { font-family: system-ui, sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }
-  .container { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  .container { max-width: 1200px; margin: 0 auto; padding: 16px; }
   .card { background: #1e293b; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
   h1 { font-size: 22px; margin: 0 0 16px; }
   h2 { font-size: 16px; margin: 0 0 12px; color: #94a3b8; }
   label { display: block; margin: 8px 0 4px; font-size: 14px; color: #94a3b8; }
-  input, textarea { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 15px; font-family: inherit; }
+  input, textarea, select { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: #e2e8f0; font-size: 15px; font-family: inherit; }
   textarea { min-height: 80px; resize: vertical; }
   button { padding: 10px 16px; border-radius: 8px; border: none; font-size: 15px; cursor: pointer; font-weight: 600; }
   .btn { background: #334155; color: #e2e8f0; }
   .btn-primary { background: #3b82f6; color: white; }
   .btn-green { background: #22c55e; color: white; }
   .btn-red { background: #ef4444; color: white; }
+  .btn-amber { background: #f59e0b; color: #0f172a; }
   .btn-sm { padding: 6px 10px; font-size: 13px; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; }
   .row > * { flex: 1; min-width: 120px; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
-  .winner-box { text-align: center; padding: 40px 20px; border-radius: 16px; background: #1e293b; border: 3px solid #334155; }
+  .winner-box { text-align: center; padding: 30px 20px; border-radius: 16px; background: #1e293b; border: 3px solid #334155; margin-bottom: 16px; }
   .winner-box.active { background: #065f46; border-color: #22c55e; }
   .winner-box .label { font-size: 16px; color: #94a3b8; }
-  .winner-box .value { font-size: 72px; font-weight: 900; line-height: 1.1; margin: 8px 0; }
+  .winner-box .value { font-size: 64px; font-weight: 900; line-height: 1.1; margin: 8px 0; }
   .winner-box .sub { font-size: 18px; color: #cbd5e1; }
-  .player-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  .player-table th, .player-table td { padding: 8px; text-align: left; border-bottom: 1px solid #334155; }
+  .player-table, .score-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .player-table th, .player-table td, .score-table th, .score-table td { padding: 8px; text-align: left; border-bottom: 1px solid #334155; }
   .muted { color: #94a3b8; font-size: 14px; }
   .hidden { display: none; }
   .status-bar { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; color: #94a3b8; }
   .status-bar b { color: #e2e8f0; }
+  .answer-panel { background: #422006; border: 2px dashed #f59e0b; border-radius: 12px; padding: 16px; }
+  .answer-panel .tag { display: inline-block; background: #f59e0b; color: #0f172a; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 700; margin-bottom: 8px; }
+  .answer-panel.revealed { background: #064e3b; border-color: #22c55e; border-style: solid; }
+  .answer-panel.revealed .tag { background: #22c55e; color: #fff; }
+  .answer-text { font-size: 22px; font-weight: 700; color: #fde68a; word-break: break-word; }
+  .answer-panel.revealed .answer-text { color: #a7f3d0; }
+  .q-preview { max-height: 220px; overflow-y: auto; font-size: 13px; }
+  .q-preview div { padding: 4px 0; border-bottom: 1px solid #334155; }
 </style>
 </head>
 <body>
@@ -55,6 +64,7 @@
       <span>状态：<b id="phaseText">-</b></span>
       <span>题目：<b id="qNumText">-</b></span>
       <span>已加入选手：<b id="onlineCount">-</b></span>
+      <span>题库：<b id="poolText">-</b></span>
     </div>
 
     <div class="winner-box" id="winnerBox">
@@ -65,30 +75,82 @@
 
     <div class="grid">
       <div class="card">
-        <h2>题目管理</h2>
-        <label>题目内容</label>
-        <textarea id="questionInput" placeholder="输入题目…"></textarea>
+        <h2>① 题库</h2>
+        <label>导入 JSON 题库（导入后自动随机打乱并固定顺序）</label>
+        <input id="jsonFile" type="file" accept=".json,application/json">
         <div class="row" style="margin-top:12px">
-          <button class="btn-green" onclick="nextQuestion()">下一题并显示</button>
-          <button class="btn" onclick="updateQuestion()">仅更新题目</button>
+          <div>
+            <label>本轮抽取数量（0 = 全部）</label>
+            <input id="pickCount" type="number" value="0" min="0">
+          </div>
+          <button class="btn-primary" onclick="importQuestions()">导入题库</button>
+        </div>
+        <div id="poolInfo" class="muted" style="margin-top:12px">尚未导入题库</div>
+
+        <hr style="border-color:#334155; margin:16px 0">
+        <label>当前题目</label>
+        <textarea id="questionInput" placeholder="导入题库后，点击「下一题」自动出题"></textarea>
+        <div class="row" style="margin-top:12px">
+          <button class="btn-green" onclick="nextFromPool()">下一题</button>
+          <button class="btn" onclick="updateQuestion()">仅更新当前题</button>
         </div>
       </div>
 
       <div class="card">
-        <h2>抢答控制</h2>
-        <label>倒计时秒数</label>
-        <input id="seconds" type="number" value="10" min="1" max="120">
+        <h2>② 抢答控制</h2>
+        <div class="row">
+          <div>
+            <label>准备倒计时（秒）</label>
+            <input id="prepareSeconds" type="number" value="3" min="0" max="30">
+          </div>
+          <div>
+            <label>抢答时长（秒）</label>
+            <input id="seconds" type="number" value="10" min="1" max="120">
+          </div>
+        </div>
         <div class="row" style="margin-top:12px">
           <button class="btn-primary" onclick="openBuzz()">开始抢答</button>
           <button class="btn-red" onclick="lockBuzz()">锁定</button>
           <button class="btn" onclick="resetBuzz()">重置本题</button>
         </div>
-        <p class="muted" style="margin-top:12px">"开始抢答"会同时启动倒计时，到 0 自动锁定。</p>
+        <p class="muted" style="margin-top:12px">"开始抢答"会先倒计时 N 秒（选手不可抢），之后正式开放，抢答时长到 0 自动锁定。</p>
+
+        <hr style="border-color:#334155; margin:16px 0">
+        <h2>③ 判定与计分</h2>
+        <div class="row">
+          <div>
+            <label>加分/扣分</label>
+            <input id="points" type="number" value="10" min="0">
+          </div>
+          <button class="btn-green" onclick="judge(true)">✅ 答对加分</button>
+          <button class="btn-red" onclick="judge(false)">❌ 答错扣分</button>
+        </div>
+        <button class="btn-amber" style="margin-top:12px; width:100%" onclick="revealAnswer()">🔔 揭晓答案（投屏）</button>
       </div>
     </div>
 
     <div class="card">
-      <h2>赛前检查 · 已加入选手</h2>
+      <h2>④ 当前题答案（仅主持人可见）</h2>
+      <div id="answerPanel" class="answer-panel">
+        <span class="tag" id="answerTag">🔒 仅主持人可见</span>
+        <div class="answer-text" id="answerText">—</div>
+        <div class="muted" id="explanationText" style="margin-top:8px"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>⑤ 分数表</h2>
+      <table class="score-table">
+        <thead><tr><th>组号</th><th>昵称</th><th>分数</th><th>操作</th></tr></thead>
+        <tbody id="scoreTbody"></tbody>
+      </table>
+      <div class="row" style="margin-top:12px">
+        <button class="btn btn-sm" onclick="resetScores()">清空分数</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>⑥ 赛前检查 · 已加入选手</h2>
       <table class="player-table">
         <thead><tr><th>组号</th><th>昵称</th><th>操作</th></tr></thead>
         <tbody id="playerTbody"></tbody>
@@ -132,10 +194,11 @@ async function poll() {
 }
 
 function render(s) {
-  const phaseMap = { idle: '待机', open: '抢答中', locked: '已锁定', timeout: '超时' };
+  const phaseMap = { idle: '待机', countdown: '准备倒计时', open: '抢答中', locked: '已锁定', timeout: '超时', revealed: '已揭晓答案' };
   document.getElementById('phaseText').textContent = phaseMap[s.phase] || s.phase;
-  document.getElementById('qNumText').textContent = s.questionNumber > 0 ? `第 ${s.questionNumber} 题` : '未出题';
+  document.getElementById('qNumText').textContent = s.questionNumber > 0 ? `第 ${s.questionNumber} / ${s.totalQuestions} 题` : '未出题';
   document.getElementById('onlineCount').textContent = s.players.length + ' / 10';
+  document.getElementById('poolText').textContent = s.totalQuestions > 0 ? `${s.totalQuestions} 题` : '未导入';
 
   if (!document.getElementById('questionInput').matches(':focus')) {
     document.getElementById('questionInput').value = s.questionText || '';
@@ -145,7 +208,7 @@ function render(s) {
   const winnerValue = document.getElementById('winnerValue');
   const winnerSub = document.getElementById('winnerSub');
 
-  if (s.phase === 'locked' && s.winner) {
+  if ((s.phase === 'locked' || s.phase === 'revealed') && s.winner) {
     winnerBox.classList.add('active');
     winnerValue.textContent = `第 ${s.winner.group} 组`;
     winnerSub.textContent = `${s.winner.name} · ${new Date(s.winner.time).toLocaleTimeString()}`;
@@ -153,6 +216,10 @@ function render(s) {
     winnerBox.classList.add('active');
     winnerValue.textContent = '超时';
     winnerSub.textContent = '无人抢答';
+  } else if (s.phase === 'countdown') {
+    winnerBox.classList.remove('active');
+    winnerValue.textContent = '准备…';
+    winnerSub.textContent = '倒计时中，选手暂不可抢答';
   } else if (s.phase === 'open') {
     winnerBox.classList.remove('active');
     winnerValue.textContent = '抢答中…';
@@ -163,9 +230,46 @@ function render(s) {
     winnerSub.textContent = '等待开始';
   }
 
+  const ap = document.getElementById('answerPanel');
+  const tag = document.getElementById('answerTag');
+  document.getElementById('answerText').textContent = s.currentAnswer || '—';
+  document.getElementById('explanationText').textContent = s.currentExplanation || '';
+  if (s.answerRevealed) {
+    ap.classList.add('revealed');
+    tag.textContent = '✅ 已投屏';
+  } else {
+    ap.classList.remove('revealed');
+    tag.textContent = '🔒 仅主持人可见';
+  }
+
+  const pi = document.getElementById('poolInfo');
+  if (s.poolPreview && s.poolPreview.length > 0) {
+    pi.innerHTML = `<div class="q-preview">${s.poolPreview.map((t, i) => `<div>${i + 1}. ${escapeHtml(t)}</div>`).join('')}</div>`;
+  } else {
+    pi.textContent = '尚未导入题库';
+  }
+
+  const sorted = [...s.players].sort((a, b) => a.group - b.group);
+
+  const st = document.getElementById('scoreTbody');
+  st.innerHTML = '';
+  for (const p of sorted) {
+    const score = s.scores[String(p.group)] || 0;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><b>第 ${p.group} 组</b></td>
+      <td>${escapeHtml(p.name)}</td>
+      <td style="font-size:18px; font-weight:700; color:#22c55e">${score}</td>
+      <td>
+        <button class="btn btn-sm" onclick="adjustScore(${p.group}, 5)">+5</button>
+        <button class="btn btn-sm" onclick="adjustScore(${p.group}, -5)">-5</button>
+      </td>
+    `;
+    st.appendChild(tr);
+  }
+
   const tbody = document.getElementById('playerTbody');
   tbody.innerHTML = '';
-  const sorted = [...s.players].sort((a, b) => a.group - b.group);
   for (const p of sorted) {
     const tr = document.createElement('tr');
     tr.innerHTML = `
@@ -190,26 +294,51 @@ async function action(action, payload = {}) {
   const data = await res.json();
   if (!data.ok) alert(data.error || '操作失败');
   poll();
+  return data;
 }
 
-function nextQuestion() {
-  const text = document.getElementById('questionInput').value.trim();
-  if (!text) { alert('请先输入题目'); return; }
-  action('setQuestion', { text, next: true });
+async function importQuestions() {
+  const f = document.getElementById('jsonFile').files[0];
+  if (!f) { alert('请先选择 JSON 文件'); return; }
+  let parsed;
+  try {
+    const text = await f.text();
+    parsed = JSON.parse(text);
+  } catch (e) {
+    alert('JSON 解析失败: ' + e.message); return;
+  }
+  const questions = Array.isArray(parsed) ? parsed : (parsed.questions || []);
+  if (!Array.isArray(questions) || questions.length === 0) {
+    alert('题库为空或格式错误，应为 { questions: [...] } 或 [...]'); return;
+  }
+  const pickCount = Number(document.getElementById('pickCount').value) || 0;
+  const title = (!Array.isArray(parsed) && parsed.title) ? parsed.title : f.name.replace(/\.json$/i, '');
+  const res = await action('importQuestions', { questions, pickCount, title });
+  if (res.ok) alert(`导入成功，共 ${res.total} 题，顺序已随机固定`);
 }
+
+function nextFromPool() { action('nextFromPool'); }
 function updateQuestion() {
   const text = document.getElementById('questionInput').value.trim();
   action('setQuestion', { text, next: false });
 }
 function openBuzz() {
+  const prepareSeconds = Number(document.getElementById('prepareSeconds').value) || 0;
   const seconds = Number(document.getElementById('seconds').value) || 10;
-  action('open', { seconds });
+  action('open', { prepareSeconds, seconds });
 }
 function lockBuzz() { action('lock'); }
 function resetBuzz() { action('reset'); }
+function judge(correct) {
+  const points = Number(document.getElementById('points').value) || 0;
+  action('judge', { correct, points, penalty: correct ? 0 : points });
+}
+function revealAnswer() { action('revealAnswer'); }
+function adjustScore(group, delta) { action('adjustScore', { group, delta }); }
+function resetScores() { if (confirm('确定清空所有分数？')) action('resetScores'); }
 function kick(id) { if (confirm('确定踢出该选手？')) action('kick', { playerId: id }); }
 function clearPlayers() { if (confirm('确定清空所有选手？')) action('clearPlayers'); }
-function resetAll() { if (confirm('确定重置整场比赛？')) action('resetAll'); }
+function resetAll() { if (confirm('确定重置整场比赛？这会清空题库和分数！')) action('resetAll'); }
 
 if (password) login();
 </script>
